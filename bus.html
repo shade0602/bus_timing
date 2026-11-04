@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Автобусы</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { background-color: #121212; color: #ffffff; padding: 16px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+        
+        /* Табы переключения */
+        .tab-container { display: flex; width: 100%; max-width: 500px; background: #222; border-radius: 12px; padding: 4px; margin-bottom: 16px; }
+        .tab { flex: 1; text-align: center; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer; color: #888; transition: 0.2s; }
+        .tab.active { background: #333; color: #fff; }
+
+        .container { display: flex; gap: 12px; width: 100%; max-width: 500px; }
+        .column { flex: 1; border-radius: 16px; padding: 14px; display: flex; flex-direction: column; align-items: center; }
+        
+        /* Зеленая и Красная колонки */
+        .green-bus { background-color: #13271c; border: 2px solid #2e7d32; }
+        .red-bus { background-color: #2b1313; border: 2px solid #c62828; }
+        
+        .title { font-size: 1.1rem; font-weight: bold; margin-bottom: 14px; text-transform: uppercase; }
+        .green-bus .title { color: #81c784; }
+        .red-bus .title { color: #e57373; }
+        
+        .bus-list { width: 100%; display: flex; flex-direction: column; gap: 10px; }
+        .bus-item { background: rgba(0,0,0,0.4); border-radius: 10px; padding: 10px 8px; text-align: center; }
+        .route-badge { font-size: 0.8rem; font-weight: bold; opacity: 0.8; margin-bottom: 2px; }
+        .main-time { font-size: 1.3rem; font-weight: bold; }
+        .sub-time { font-size: 0.85rem; color: #b0b0b0; margin-top: 2px; }
+        
+        .refresh-btn { margin-top: 20px; padding: 12px 28px; background: #2a2a2a; color: #fff; border: 1px solid #444; border-radius: 24px; font-size: 0.95rem; cursor: pointer; }
+        .refresh-btn:active { background: #444; }
+    </style>
+</head>
+<body>
+
+    <div class="tab-container">
+        <div class="tab active" id="tab-home" onclick="setDirection('home')">Домой</div>
+        <div class="tab" id="tab-uni" onclick="setDirection('uni')">В универ</div>
+    </div>
+
+    <div class="container">
+        <!-- Красная колонка -->
+        <div class="column red-bus">
+            <div class="title">Красный</div>
+            <div class="bus-list" id="red-list"></div>
+        </div>
+
+        <!-- Зеленая колонка -->
+        <div class="column green-bus">
+            <div class="title">Зеленый</div>
+            <div class="bus-list" id="green-list"></div>
+        </div>
+    </div>
+
+    <button class="refresh-btn" onclick="updateSchedule()">Обновить</button>
+
+    <script>
+        let currentDirection = 'home';
+
+        // Генераторы расписаний по интервалам
+        function generateHourly(route, minute, startHour, endHour) {
+            const list = [];
+            let h = startHour;
+            while (true) {
+                const timeStr = `${String(h).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+                list.push({ route, time: timeStr });
+                if (h === endHour) break;
+                h = (h + 1) % 24;
+            }
+            return list;
+        }
+
+        function generateStep(route, minute, startHour, endHour, step) {
+            const list = [];
+            let h = startHour;
+            while (true) {
+                const timeStr = `${String(h).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+                list.push({ route, time: timeStr });
+                if (h === endHour) break;
+                h = (h + step) % 24;
+            }
+            return list;
+        }
+
+        // Данные маршрутов
+        const schedules = {
+            home: {
+                red: [
+                    ...generateHourly("901", 44, 4, 23),
+                    ...generateHourly("911", 48, 5, 0)
+                ],
+                green: [
+                    { route: "350", time: "09:25" },
+                    { route: "350", time: "13:26" },
+                    { route: "350", time: "17:25" },
+                    { route: "350", time: "21:43" },
+                    { route: "350", time: "01:24" },
+                    ...generateStep("908", 7, 5, 23, 2),
+                    ...generateHourly("909", 55, 4, 23),
+                    ...generateStep("918", 13, 6, 22, 2),
+                    ...generateHourly("919", 29, 5, 0),
+                    ...generateStep("928", 43, 5, 23, 2)
+                ]
+            },
+            uni: {
+                red: [
+                    ...generateHourly("901", 24, 5, 0),
+                    ...generateHourly("911", 58, 5, 0)
+                ],
+                green: [] // Пока пусто (укажешь если понадобятся зеленое расписание в универ)
+            }
+        };
+
+        function setDirection(dir) {
+            currentDirection = dir;
+            document.getElementById('tab-home').classList.toggle('active', dir === 'home');
+            document.getElementById('tab-uni').classList.toggle('active', dir === 'uni');
+            updateSchedule();
+        }
+
+        function getNextBuses(busList) {
+            const now = new Date();
+            const currentMinutes = now.getHours() * 60 + now.getMinutes();
+            
+            const upcoming = [];
+
+            for (let item of busList) {
+                const [h, m] = item.time.split(':').map(Number);
+                let busMinutes = h * 60 + m;
+                
+                let diff = busMinutes - currentMinutes;
+
+                // Если время уже прошло за эти сутки, считаем его как рейс на следующий день (+24ч)
+                if (diff < 0) {
+                    diff += 24 * 60;
+                }
+
+                upcoming.push({
+                    route: item.route,
+                    timeStr: item.time,
+                    minutesLeft: diff
+                });
+            }
+
+            // Сортируем по ближайшему времени
+            upcoming.sort((a, b) => a.minutesLeft - b.minutesLeft);
+
+            // Возвращаем первые 4 ближайших
+            return upcoming.slice(0, 4);
+        }
+
+        function renderColumn(elementId, buses) {
+            const container = document.getElementById(elementId);
+            container.innerHTML = '';
+
+            if (!buses || buses.length === 0) {
+                container.innerHTML = '<div class="bus-item" style="opacity:0.5">Нет рейсов</div>';
+                return;
+            }
+
+            buses.forEach(bus => {
+                const item = document.createElement('div');
+                item.className = 'bus-item';
+                
+                let leftText = `через ${bus.minutesLeft} мин`;
+                if (bus.minutesLeft === 0) leftText = 'Сейчас!';
+
+                item.innerHTML = `
+                    <div class="route-badge">№ ${bus.route}</div>
+                    <div class="main-time">${leftText}</div>
+                    <div class="sub-time">(${bus.timeStr})</div>
+                `;
+                container.appendChild(item);
+            });
+        }
+
+        function updateSchedule() {
+            const currentData = schedules[currentDirection];
+            renderColumn('red-list', getNextBuses(currentData.red));
+            renderColumn('green-list', getNextBuses(currentData.green));
+        }
+
+        // Обновление при запуске
+        updateSchedule();
+    </script>
+</body>
+</html>
